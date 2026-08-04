@@ -21,7 +21,7 @@ Home Assistant에서 CJ대한통운(CJ O-NE) 배송 현황을 조회하고, 배�
 
 ## 현재 버전
 
-- `v0.2.3`
+- `v0.2.4`
 
 ## 설치
 
@@ -70,8 +70,8 @@ config/
 - `진행중 배송 슬롯 개수`: 1~3개
 - `배송완료 슬롯 개수`: 1~5개
 
-엔터티 레지스트리 안정성을 위해 최대 슬롯 센서는 미리 생성됩니다. 옵션에서 선택한 개수
-밖의 슬롯은 `사용 안 함` 상태로 표시됩니다.
+설정한 슬롯 개수만큼 센서가 생성됩니다. 옵션에서 슬롯 개수를 줄이면 초과 슬롯의 엔티티와
+기기 항목은 정리됩니다.
 
 ## 생성되는 센서
 
@@ -91,7 +91,7 @@ config/
 
 ### 진행중 배송 슬롯
 
-진행중 배송은 최근 일시 기준 최대 3개 슬롯으로 표시됩니다. 표시 개수는 옵션에서
+진행중 배송은 최근 일시 기준 최대 3개 슬롯으로 표시됩니다. 생성 개수는 옵션에서
 1~3개 사이로 조정할 수 있습니다.
 
 - `진행중 배송 슬롯 1`
@@ -112,7 +112,7 @@ config/
 
 ### 배송완료 슬롯
 
-배송완료 건은 최근 완료일 기준 최대 5개 슬롯으로 표시됩니다. 표시 개수는 옵션에서
+배송완료 건은 최근 완료일 기준 최대 5개 슬롯으로 표시됩니다. 생성 개수는 옵션에서
 1~5개 사이로 조정할 수 있습니다.
 
 - `배송완료 슬롯 1`
@@ -145,26 +145,62 @@ config/
 
 ## 자동화 예시
 
-배송 상태가 바뀔 때 구글 스피커로 방송하려면 `최근 배송 이벤트` 센서를 트리거로
-사용하면 됩니다.
+배송 상태가 바뀔 때 스피커로 방송하려면 `최근 배송 이벤트` 센서를 트리거로 사용하면
+됩니다. 아래 예시는 `tts.speak`와 `edge_tts`를 사용하는 경우입니다.
 
 ```yaml
-alias: CJ O-NE 배송 상태 방송
-trigger:
-  - platform: state
-    entity_id: sensor.cj_o_ne_choegeun_baesong_ibenteu
-condition:
+alias: "[택배] CJ O-NE 배송 상태 변경 알림"
+description: ""
+triggers:
+  - trigger: state
+    entity_id:
+      - sensor.cj_o_ne_baesongjohoe_coegeun_baesong_ibenteu
+conditions:
   - condition: template
     value_template: >
-      {{ trigger.to_state.state not in ['배송 변경 이벤트 없음', 'unknown', 'unavailable'] }}
-action:
-  - service: tts.google_translate_say
+      {{ trigger.to_state is not none
+         and trigger.to_state.state not in ['unknown', 'unavailable', '배송 변경 이벤트 없음']
+         and state_attr('sensor.cj_o_ne_baesongjohoe_coegeun_baesong_ibenteu', 'announcement') not in [none, ''] }}
+actions:
+  - action: tts.speak
+    target:
+      entity_id: tts.edge_tts_2
     data:
-      entity_id: media_player.google_speaker
-      message: "{{ trigger.to_state.state }}"
+      cache: true
+      media_player_entity_id:
+        - media_player.geosil_mini
+        - media_player.anbang_mini
+      message: "{{ state_attr('sensor.cj_o_ne_baesongjohoe_coegeun_baesong_ibenteu', 'announcement') }}"
+      language: ko-KR
+mode: single
 ```
 
 실제 `entity_id`는 Home Assistant에서 생성된 엔티티 ID에 맞게 바꿔야 합니다.
+
+### 방송 문구 형식
+
+`최근 배송 이벤트` 센서의 `announcement` 속성에는 방송에 바로 사용할 수 있는 문장이
+저장됩니다.
+
+새 배송건이 감지되면 아래 형식으로 제공됩니다.
+
+```text
+{상품명} 배송이 새로 확인되었습니다. 현재 {최근위치}에서 {상태} 상태입니다.
+```
+
+기존 배송건의 상태, 위치, 시간이 바뀌면 아래 형식으로 제공됩니다.
+
+```text
+{상품명} 배송이 {최근위치}에서 {상태} 상태로 변경되었습니다.
+```
+
+예시:
+
+```text
+led adapter 배송이 대전Hub에서 간선상차 상태로 변경되었습니다.
+```
+
+상품명이 없으면 `택배`로 대체되고, 최근 위치가 없으면 위치 문구는 생략됩니다.
 
 ## 업데이트 주기
 
