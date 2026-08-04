@@ -83,6 +83,7 @@ class CJOneDeliveryClient:
         access_token: str | None = None,
         refresh_token: str | None = None,
         device_id: str | None = None,
+        completed_recent_limit: int = COMPLETED_RECENT_LIMIT,
         token_update_callback: Callable[[AuthSession], Awaitable[None]] | None = None,
     ) -> None:
         """클라이언트를 초기화합니다."""
@@ -92,6 +93,7 @@ class CJOneDeliveryClient:
         self._access_token = access_token
         self._refresh_token = refresh_token
         self._device_id = device_id or _make_device_id(self._phone_number)
+        self._completed_recent_limit = completed_recent_limit
         self._token_update_callback = token_update_callback
 
     async def async_send_verification_code(self) -> None:
@@ -152,6 +154,10 @@ class CJOneDeliveryClient:
         """저장된 인증 토큰이 유효한지 확인합니다."""
         if not self._access_token or not self._refresh_token or not self._user_id:
             raise InvalidAuth("저장된 인증 토큰이 없습니다.")
+
+    def set_completed_recent_limit(self, limit: int) -> None:
+        """완료 배송 상세 조회 제한 개수를 설정합니다."""
+        self._completed_recent_limit = limit
 
     async def async_refresh_token(self) -> AuthSession:
         """저장된 refresh token으로 앱 인증 토큰을 갱신합니다."""
@@ -216,7 +222,10 @@ class CJOneDeliveryClient:
             len(rows),
         )
         statuses: dict[str, DeliveryStatus] = {}
-        for row in _filter_display_rows(rows):
+        for row in _filter_display_rows(
+            rows,
+            completed_recent_limit=self._completed_recent_limit,
+        ):
             if not isinstance(row, dict):
                 continue
             detail = await self._async_get_delivery_detail(row)
@@ -720,13 +729,17 @@ def _deduplicate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(deduplicated.values())
 
 
-def _filter_display_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _filter_display_rows(
+    rows: list[dict[str, Any]],
+    *,
+    completed_recent_limit: int,
+) -> list[dict[str, Any]]:
     """진행중 배송 전체와 최근 완료 배송 일부만 반환합니다."""
     active_rows = [row for row in rows if not _is_completed_delivery(row)]
     completed_rows = [row for row in rows if _is_completed_delivery(row)]
     active_rows.sort(key=_row_sort_key, reverse=True)
     completed_rows.sort(key=_row_sort_key, reverse=True)
-    return active_rows + completed_rows[:COMPLETED_RECENT_LIMIT]
+    return active_rows + completed_rows[:completed_recent_limit]
 
 
 def _is_completed_delivery(row: dict[str, Any]) -> bool:

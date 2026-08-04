@@ -13,7 +13,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import DeliveryStatus
 from .const import (
     ACTIVE_SLOT_LIMIT,
+    CONF_ACTIVE_SLOT_COUNT,
+    CONF_COMPLETED_SLOT_COUNT,
     COMPLETED_RECENT_LIMIT,
+    DEFAULT_ACTIVE_SLOT_COUNT,
+    DEFAULT_COMPLETED_SLOT_COUNT,
     DOMAIN,
 )
 from .coordinator import CJOneDeliveryCoordinator, DeliveryEvent
@@ -92,7 +96,9 @@ class CJOneDeliverySummarySensor(
         return {
             "active_count": len(self.coordinator.active_statuses),
             "completed_recent_count": len(self.coordinator.completed_statuses),
-            "completed_recent_limit": COMPLETED_RECENT_LIMIT,
+            "active_slot_count": _active_slot_count(self.coordinator.config_entry),
+            "completed_slot_count": _completed_slot_count(self.coordinator.config_entry),
+            "completed_recent_limit": _completed_slot_count(self.coordinator.config_entry),
             "last_changed_summary": last_event.announcement if last_event else "",
             "last_error": self.coordinator.last_error or "",
         }
@@ -119,7 +125,7 @@ class CJOneDeliveryDeliveryListSensor(
             self._attr_name = "진행중 배송"
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_active"
         else:
-            self._attr_name = f"배송완료 최근 {COMPLETED_RECENT_LIMIT}건"
+            self._attr_name = "배송완료 최근 배송"
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_completed_recent"
 
     @property
@@ -138,7 +144,9 @@ class CJOneDeliveryDeliveryListSensor(
             "last_error": self.coordinator.last_error or "",
         }
         if self._list_type == "completed_recent":
-            attrs["completed_recent_limit"] = COMPLETED_RECENT_LIMIT
+            attrs["completed_recent_limit"] = _completed_slot_count(
+                self.coordinator.config_entry
+            )
         return attrs
 
     @property
@@ -187,7 +195,7 @@ class CJOneDeliveryDeliverySlotFieldSensor(
         """슬롯 배송의 세부 정보 값을 반환합니다."""
         status = self._status
         if status is None:
-            return "없음"
+            return "사용 안 함" if not self._is_enabled_slot else "없음"
 
         payload = _delivery_payload(status)
         if self._field == "detail":
@@ -203,6 +211,7 @@ class CJOneDeliveryDeliverySlotFieldSensor(
             "slot_index": self._slot_index + 1,
             "field": self._field,
             "is_empty": status is None,
+            "is_enabled": self._is_enabled_slot,
             "last_error": self.coordinator.last_error or "",
         }
         if status is None:
@@ -227,6 +236,8 @@ class CJOneDeliveryDeliverySlotFieldSensor(
     @property
     def _status(self) -> DeliveryStatus | None:
         """이 슬롯에 표시할 배송 상태를 반환합니다."""
+        if not self._is_enabled_slot:
+            return None
         statuses = (
             self.coordinator.active_statuses
             if self._slot_type == "active"
@@ -235,6 +246,13 @@ class CJOneDeliveryDeliverySlotFieldSensor(
         if self._slot_index >= len(statuses):
             return None
         return statuses[self._slot_index]
+
+    @property
+    def _is_enabled_slot(self) -> bool:
+        """옵션에서 활성화된 슬롯인지 반환합니다."""
+        if self._slot_type == "active":
+            return self._slot_index < _active_slot_count(self.coordinator.config_entry)
+        return self._slot_index < _completed_slot_count(self.coordinator.config_entry)
 
 
 class CJOneDeliveryLastEventSensor(
@@ -329,6 +347,26 @@ def _format_tracking_number(tracking_number: str) -> str:
     """운송장 번호를 네 자리 단위로 포맷합니다."""
     digits = "".join(char for char in tracking_number if char.isdigit())
     return "-".join(digits[index : index + 4] for index in range(0, len(digits), 4))
+
+
+def _active_slot_count(entry: ConfigEntry) -> int:
+    """옵션에 설정된 진행중 슬롯 개수를 반환합니다."""
+    return int(
+        entry.options.get(
+            CONF_ACTIVE_SLOT_COUNT,
+            DEFAULT_ACTIVE_SLOT_COUNT,
+        )
+    )
+
+
+def _completed_slot_count(entry: ConfigEntry) -> int:
+    """옵션에 설정된 완료 슬롯 개수를 반환합니다."""
+    return int(
+        entry.options.get(
+            CONF_COMPLETED_SLOT_COUNT,
+            DEFAULT_COMPLETED_SLOT_COUNT,
+        )
+    )
 
 
 def _device_info(coordinator: CJOneDeliveryCoordinator) -> dict[str, Any]:

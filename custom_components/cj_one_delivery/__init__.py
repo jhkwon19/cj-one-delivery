@@ -9,9 +9,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import AuthSession, CJOneDeliveryClient
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_COMPLETED_SLOT_COUNT,
     CONF_PHONE_NUMBER,
     CONF_REFRESH_TOKEN,
     CONF_USER_ID,
+    DEFAULT_COMPLETED_SLOT_COUNT,
     DOMAIN,
     PLATFORMS,
 )
@@ -45,12 +47,17 @@ async def async_setup_entry(
         user_id=entry.data[CONF_USER_ID],
         access_token=entry.data[CONF_ACCESS_TOKEN],
         refresh_token=entry.data[CONF_REFRESH_TOKEN],
+        completed_recent_limit=entry.options.get(
+            CONF_COMPLETED_SLOT_COUNT,
+            DEFAULT_COMPLETED_SLOT_COUNT,
+        ),
         token_update_callback=async_update_tokens,
     )
     coordinator = CJOneDeliveryCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -61,3 +68,15 @@ async def async_unload_entry(
 ) -> bool:
     """설정 항목을 언로드합니다."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def _async_update_listener(
+    hass: HomeAssistant,
+    entry: CJOneDeliveryConfigEntry,
+) -> None:
+    """옵션 변경사항을 적용합니다."""
+    entry.runtime_data.apply_options()
+    entry.runtime_data.client.set_completed_recent_limit(
+        entry.options.get(CONF_COMPLETED_SLOT_COUNT, DEFAULT_COMPLETED_SLOT_COUNT)
+    )
+    await entry.runtime_data.async_request_refresh()

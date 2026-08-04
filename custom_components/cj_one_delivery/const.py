@@ -1,7 +1,5 @@
 """CJ O-NE 배송조회 통합구성요소 상수."""
 
-from datetime import timedelta
-
 DOMAIN = "cj_one_delivery"
 
 CONF_AUTH_CODE = "auth_code"
@@ -9,9 +7,16 @@ CONF_ACCESS_TOKEN = "access_token"
 CONF_PHONE_NUMBER = "phone_number"
 CONF_REFRESH_TOKEN = "refresh_token"
 CONF_USER_ID = "user_id"
+CONF_SCAN_INTERVAL_MINUTES = "scan_interval_minutes"
+CONF_ACTIVE_SLOT_COUNT = "active_slot_count"
+CONF_COMPLETED_SLOT_COUNT = "completed_slot_count"
 
-DEFAULT_SCAN_INTERVAL = timedelta(minutes=30)
 ACTIVE_SLOT_LIMIT = 3
 COMPLETED_RECENT_LIMIT = 5
+DEFAULT_SCAN_INTERVAL_MINUTES = 30
+MIN_SCAN_INTERVAL_MINUTES = 5
+MAX_SCAN_INTERVAL_MINUTES = 180
+DEFAULT_ACTIVE_SLOT_COUNT = ACTIVE_SLOT_LIMIT
+DEFAULT_COMPLETED_SLOT_COUNT = COMPLETED_RECENT_LIMIT
 
 PLATFORMS = ["sensor"]

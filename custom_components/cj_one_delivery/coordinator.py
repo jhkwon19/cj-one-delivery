@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import timedelta
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -11,7 +12,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import CJOneDeliveryClient, DeliveryStatus
-from .const import COMPLETED_RECENT_LIMIT, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import (
+    CONF_COMPLETED_SLOT_COUNT,
+    CONF_SCAN_INTERVAL_MINUTES,
+    DEFAULT_COMPLETED_SLOT_COUNT,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
+    DOMAIN,
+)
 from .exceptions import CJOneDeliveryError
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,7 +55,7 @@ class CJOneDeliveryCoordinator(DataUpdateCoordinator[dict[str, DeliveryStatus]])
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=DEFAULT_SCAN_INTERVAL,
+            update_interval=_scan_interval(entry),
         )
         self.client = client
         self.last_error: str | None = None
@@ -68,8 +75,15 @@ class CJOneDeliveryCoordinator(DataUpdateCoordinator[dict[str, DeliveryStatus]])
         self.last_error = None
         self._update_last_event(data)
         self.active_statuses = _active_statuses(data.values())
-        self.completed_statuses = _completed_statuses(data.values())
+        self.completed_statuses = _completed_statuses(
+            data.values(),
+            limit=_completed_slot_count(self.config_entry),
+        )
         return data
+
+    def apply_options(self) -> None:
+        """옵션 변경사항을 코디네이터에 반영합니다."""
+        self.update_interval = _scan_interval(self.config_entry)
 
     def _update_last_event(self, data: dict[str, DeliveryStatus]) -> None:
         """이전 조회 데이터와 비교해 최근 배송 변경 이벤트를 갱신합니다."""
@@ -154,11 +168,35 @@ def _active_statuses(statuses: Iterable[DeliveryStatus]) -> list[DeliveryStatus]
     return sorted(active, key=lambda status: status.last_event_time or "", reverse=True)
 
 
-def _completed_statuses(statuses: Iterable[DeliveryStatus]) -> list[DeliveryStatus]:
+def _completed_statuses(
+    statuses: Iterable[DeliveryStatus],
+    *,
+    limit: int,
+) -> list[DeliveryStatus]:
     """완료 배송 목록을 최근 일시순으로 반환합니다."""
     completed = [status for status in statuses if status.display_group == "배송완료"]
     return sorted(
         completed,
         key=lambda status: status.last_event_time or "",
         reverse=True,
-    )[:COMPLETED_RECENT_LIMIT]
+    )[:limit]
+
+
+def _scan_interval(entry: ConfigEntry) -> timedelta:
+    """설정된 조회 주기를 반환합니다."""
+    return timedelta(
+        minutes=entry.options.get(
+            CONF_SCAN_INTERVAL_MINUTES,
+            DEFAULT_SCAN_INTERVAL_MINUTES,
+        )
+    )
+
+
+def _completed_slot_count(entry: ConfigEntry) -> int:
+    """설정된 완료 슬롯 표시 개수를 반환합니다."""
+    return int(
+        entry.options.get(
+            CONF_COMPLETED_SLOT_COUNT,
+            DEFAULT_COMPLETED_SLOT_COUNT,
+        )
+    )
