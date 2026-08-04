@@ -8,6 +8,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DeliveryStatus
@@ -43,6 +44,14 @@ async def async_setup_entry(
 ) -> None:
     """택배 상태 센서를 설정합니다."""
     coordinator = entry.runtime_data
+    active_slot_count = _active_slot_count(entry)
+    completed_slot_count = _completed_slot_count(entry)
+    _remove_unconfigured_slot_entities(
+        hass,
+        entry,
+        active_slot_count=active_slot_count,
+        completed_slot_count=completed_slot_count,
+    )
     async_add_entities(
         [
             CJOneDeliverySummarySensor(coordinator),
@@ -50,7 +59,7 @@ async def async_setup_entry(
             CJOneDeliveryDeliveryListSensor(coordinator, "completed_recent"),
             *[
                 CJOneDeliveryDeliverySlotFieldSensor(coordinator, "active", index, field)
-                for index in range(ACTIVE_SLOT_LIMIT)
+                for index in range(active_slot_count)
                 for field, _name in SLOT_FIELDS
             ],
             *[
@@ -60,7 +69,7 @@ async def async_setup_entry(
                     index,
                     field,
                 )
-                for index in range(COMPLETED_RECENT_LIMIT)
+                for index in range(completed_slot_count)
                 for field, _name in SLOT_FIELDS
             ],
             CJOneDeliveryLastEventSensor(coordinator),
@@ -195,7 +204,7 @@ class CJOneDeliveryDeliverySlotFieldSensor(
         """슬롯 배송의 세부 정보 값을 반환합니다."""
         status = self._status
         if status is None:
-            return "사용 안 함" if not self._is_enabled_slot else "없음"
+            return "없음"
 
         payload = _delivery_payload(status)
         if self._field == "detail":
@@ -211,7 +220,6 @@ class CJOneDeliveryDeliverySlotFieldSensor(
             "slot_index": self._slot_index + 1,
             "field": self._field,
             "is_empty": status is None,
-            "is_enabled": self._is_enabled_slot,
             "last_error": self.coordinator.last_error or "",
         }
         if status is None:
@@ -236,8 +244,6 @@ class CJOneDeliveryDeliverySlotFieldSensor(
     @property
     def _status(self) -> DeliveryStatus | None:
         """이 슬롯에 표시할 배송 상태를 반환합니다."""
-        if not self._is_enabled_slot:
-            return None
         statuses = (
             self.coordinator.active_statuses
             if self._slot_type == "active"
@@ -246,13 +252,6 @@ class CJOneDeliveryDeliverySlotFieldSensor(
         if self._slot_index >= len(statuses):
             return None
         return statuses[self._slot_index]
-
-    @property
-    def _is_enabled_slot(self) -> bool:
-        """옵션에서 활성화된 슬롯인지 반환합니다."""
-        if self._slot_type == "active":
-            return self._slot_index < _active_slot_count(self.coordinator.config_entry)
-        return self._slot_index < _completed_slot_count(self.coordinator.config_entry)
 
 
 class CJOneDeliveryLastEventSensor(
@@ -367,6 +366,36 @@ def _completed_slot_count(entry: ConfigEntry) -> int:
             DEFAULT_COMPLETED_SLOT_COUNT,
         )
     )
+
+
+def _remove_unconfigured_slot_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    active_slot_count: int,
+    completed_slot_count: int,
+) -> None:
+    """현재 옵션 범위를 벗어난 슬롯 엔티티를 레지스트리에서 제거합니다."""
+    entity_registry = er.async_get(hass)
+    for index in range(active_slot_count, ACTIVE_SLOT_LIMIT):
+        _remove_slot_entities(entity_registry, entry, "active", index)
+    for index in range(completed_slot_count, COMPLETED_RECENT_LIMIT):
+        _remove_slot_entities(entity_registry, entry, "completed", index)
+
+
+def _remove_slot_entities(
+    entity_registry: er.EntityRegistry,
+    entry: ConfigEntry,
+    slot_id: str,
+    slot_index: int,
+) -> None:
+    """슬롯 하나에 속한 센서 엔티티를 레지스트리에서 제거합니다."""
+    number = slot_index + 1
+    for field, _name in SLOT_FIELDS:
+        unique_id = f"{entry.entry_id}_{slot_id}_{number}_{field}"
+        entity_id = entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+        if entity_id is not None:
+            entity_registry.async_remove(entity_id)
 
 
 def _device_info(coordinator: CJOneDeliveryCoordinator) -> dict[str, Any]:

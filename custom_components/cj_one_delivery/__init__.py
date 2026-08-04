@@ -9,10 +9,12 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import AuthSession, CJOneDeliveryClient
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_ACTIVE_SLOT_COUNT,
     CONF_COMPLETED_SLOT_COUNT,
     CONF_PHONE_NUMBER,
     CONF_REFRESH_TOKEN,
     CONF_USER_ID,
+    DEFAULT_ACTIVE_SLOT_COUNT,
     DEFAULT_COMPLETED_SLOT_COUNT,
     DOMAIN,
     PLATFORMS,
@@ -57,6 +59,8 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
+    coordinator.loaded_active_slot_count = _active_slot_count(entry)
+    coordinator.loaded_completed_slot_count = _completed_slot_count(entry)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -75,8 +79,25 @@ async def _async_update_listener(
     entry: CJOneDeliveryConfigEntry,
 ) -> None:
     """옵션 변경사항을 적용합니다."""
+    if (
+        entry.runtime_data.loaded_active_slot_count != _active_slot_count(entry)
+        or entry.runtime_data.loaded_completed_slot_count != _completed_slot_count(entry)
+    ):
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
     entry.runtime_data.apply_options()
     entry.runtime_data.client.set_completed_recent_limit(
         entry.options.get(CONF_COMPLETED_SLOT_COUNT, DEFAULT_COMPLETED_SLOT_COUNT)
     )
     await entry.runtime_data.async_request_refresh()
+
+
+def _active_slot_count(entry: ConfigEntry) -> int:
+    """옵션에 설정된 진행중 슬롯 개수를 반환합니다."""
+    return int(entry.options.get(CONF_ACTIVE_SLOT_COUNT, DEFAULT_ACTIVE_SLOT_COUNT))
+
+
+def _completed_slot_count(entry: ConfigEntry) -> int:
+    """옵션에 설정된 완료 슬롯 개수를 반환합니다."""
+    return int(entry.options.get(CONF_COMPLETED_SLOT_COUNT, DEFAULT_COMPLETED_SLOT_COUNT))
