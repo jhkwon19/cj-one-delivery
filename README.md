@@ -17,6 +17,10 @@ Home Assistant에서 CJ대한통운(CJ O-NE) 배송 현황을 조회하고, 배�
 - Home Assistant 자동화와 TTS 방송에 활용 가능
 - 별도 커스텀 Lovelace 카드 불필요
 
+## 현재 버전
+
+- `v0.1.0`
+
 ## 설치
 
 ### HACS 사용자 저장소로 설치

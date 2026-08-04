@@ -4,9 +4,9 @@
   "codeowners": [],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/custom-components/cj_one_delivery",
+  "documentation": "https://github.com/jhkwon19/cj-one-delivery",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/custom-components/cj_one_delivery/issues",
+  "issue_tracker": "https://github.com/jhkwon19/cj-one-delivery/issues",
   "requirements": [],
   "version": "0.1.0"
 }
