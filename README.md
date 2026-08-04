@@ -168,3 +168,7 @@ action:
 ## 지원 버전
 
 - Home Assistant Core `2026.7.4` 이상
+
+## 라이선스
+
+이 프로젝트는 MIT License로 배포됩니다. 자세한 내용은 `LICENSE` 파일을 확인하세요.
