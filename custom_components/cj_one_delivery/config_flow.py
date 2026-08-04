@@ -9,7 +9,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .api import CJOneDeliveryClient
+from .api import AuthSession, CJOneDeliveryClient
 from .const import (
     ACTIVE_SLOT_LIMIT,
     CONF_ACCESS_TOKEN,
@@ -31,11 +31,54 @@ from .const import (
 from .exceptions import CannotConnect, InvalidAuth
 
 
+def _options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
+    """배송조회 옵션 입력 스키마를 반환합니다."""
+    options = options or {}
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_SCAN_INTERVAL_MINUTES,
+                default=options.get(
+                    CONF_SCAN_INTERVAL_MINUTES,
+                    DEFAULT_SCAN_INTERVAL_MINUTES,
+                ),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(
+                    min=MIN_SCAN_INTERVAL_MINUTES,
+                    max=MAX_SCAN_INTERVAL_MINUTES,
+                ),
+            ),
+            vol.Required(
+                CONF_ACTIVE_SLOT_COUNT,
+                default=options.get(
+                    CONF_ACTIVE_SLOT_COUNT,
+                    DEFAULT_ACTIVE_SLOT_COUNT,
+                ),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=1, max=ACTIVE_SLOT_LIMIT),
+            ),
+            vol.Required(
+                CONF_COMPLETED_SLOT_COUNT,
+                default=options.get(
+                    CONF_COMPLETED_SLOT_COUNT,
+                    DEFAULT_COMPLETED_SLOT_COUNT,
+                ),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=1, max=COMPLETED_RECENT_LIMIT),
+            ),
+        }
+    )
+
+
 class CJOneDeliveryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """CJ O-NE 배송조회 설정 플로우를 처리합니다."""
 
     VERSION = 1
     _phone_number: str
+    _auth_session: AuthSession
 
     @staticmethod
     def async_get_options_flow(
@@ -99,15 +142,8 @@ class CJOneDeliveryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(self._phone_number)
                 self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title=self._phone_number,
-                    data={
-                        CONF_PHONE_NUMBER: self._phone_number,
-                        CONF_USER_ID: auth_session.user_id,
-                        CONF_ACCESS_TOKEN: auth_session.access_token,
-                        CONF_REFRESH_TOKEN: auth_session.refresh_token,
-                    },
-                )
+                self._auth_session = auth_session
+                return await self.async_step_options()
 
         return self.async_show_form(
             step_id="code",
@@ -117,6 +153,28 @@ class CJOneDeliveryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_options(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """최초 등록 시 배송조회 옵션 설정 단계를 처리합니다."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=self._phone_number,
+                data={
+                    CONF_PHONE_NUMBER: self._phone_number,
+                    CONF_USER_ID: self._auth_session.user_id,
+                    CONF_ACCESS_TOKEN: self._auth_session.access_token,
+                    CONF_REFRESH_TOKEN: self._auth_session.refresh_token,
+                },
+                options=user_input,
+            )
+
+        return self.async_show_form(
+            step_id="options",
+            data_schema=_options_schema(),
         )
 
 
@@ -135,44 +193,7 @@ class CJOneDeliveryOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        options = self._config_entry.options
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_SCAN_INTERVAL_MINUTES,
-                        default=options.get(
-                            CONF_SCAN_INTERVAL_MINUTES,
-                            DEFAULT_SCAN_INTERVAL_MINUTES,
-                        ),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(
-                            min=MIN_SCAN_INTERVAL_MINUTES,
-                            max=MAX_SCAN_INTERVAL_MINUTES,
-                        ),
-                    ),
-                    vol.Required(
-                        CONF_ACTIVE_SLOT_COUNT,
-                        default=options.get(
-                            CONF_ACTIVE_SLOT_COUNT,
-                            DEFAULT_ACTIVE_SLOT_COUNT,
-                        ),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=1, max=ACTIVE_SLOT_LIMIT),
-                    ),
-                    vol.Required(
-                        CONF_COMPLETED_SLOT_COUNT,
-                        default=options.get(
-                            CONF_COMPLETED_SLOT_COUNT,
-                            DEFAULT_COMPLETED_SLOT_COUNT,
-                        ),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=1, max=COMPLETED_RECENT_LIMIT),
-                    ),
-                }
-            ),
+            data_schema=_options_schema(dict(self._config_entry.options)),
         )
