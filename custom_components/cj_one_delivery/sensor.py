@@ -219,17 +219,17 @@ class CJOneDeliveryDeliverySlotFieldSensor(
             return attrs
 
         payload = _delivery_payload(status)
-        attrs.update(
-            {
-                "tracking_number": payload["tracking_number"],
-                "tracking_number_display": payload["tracking_number_display"],
-                "status": payload["status"],
-                "product_name": payload["product_name"],
-                "last_location": payload["last_location"],
-                "last_event_time": payload["last_event_time"],
-            }
-        )
         if self._field == "detail":
+            attrs.update(
+                {
+                    "tracking_number": payload["tracking_number"],
+                    "tracking_number_display": payload["tracking_number_display"],
+                    "status": payload["status"],
+                    "product_name": payload["product_name"],
+                    "last_location": payload["last_location"],
+                    "last_event_time": payload["last_event_time"],
+                }
+            )
             attrs["basic_info"] = payload["basic_info"]
             attrs["tracking_history"] = payload["tracking_history"]
         return attrs
