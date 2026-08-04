@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import CJOneDeliveryClient
+from .api import AuthSession, CJOneDeliveryClient
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_PHONE_NUMBER,
@@ -26,12 +26,26 @@ async def async_setup_entry(
 ) -> bool:
     """설정 항목에서 CJ O-NE 배송조회를 설정합니다."""
     session = async_get_clientsession(hass)
+
+    async def async_update_tokens(auth_session: AuthSession) -> None:
+        """갱신된 앱 인증 토큰을 설정 항목에 저장합니다."""
+        hass.config_entries.async_update_entry(
+            entry,
+            data={
+                **entry.data,
+                CONF_USER_ID: auth_session.user_id,
+                CONF_ACCESS_TOKEN: auth_session.access_token,
+                CONF_REFRESH_TOKEN: auth_session.refresh_token,
+            },
+        )
+
     client = CJOneDeliveryClient(
         session=session,
         phone_number=entry.data[CONF_PHONE_NUMBER],
         user_id=entry.data[CONF_USER_ID],
         access_token=entry.data[CONF_ACCESS_TOKEN],
         refresh_token=entry.data[CONF_REFRESH_TOKEN],
+        token_update_callback=async_update_tokens,
     )
     coordinator = CJOneDeliveryCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()

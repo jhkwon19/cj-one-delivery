@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import base64
+from collections.abc import Awaitable, Callable
 import hashlib
 import json
 import logging
@@ -22,6 +23,9 @@ from .exceptions import CJOneDeliveryError, CannotConnect, InvalidAuth
 from .const import COMPLETED_RECENT_LIMIT
 
 _LOGGER = logging.getLogger(__name__)
+
+TOKEN_EXPIRED_CODES = {"TFE", "TOKEN_EXPIRED"}
+TOKEN_INVALID_CODES = {"TFA", "TF"}
 
 APP_ID = "cjkoreaexpress"
 APP_VERSION = "6.3.3"
@@ -79,6 +83,7 @@ class CJOneDeliveryClient:
         access_token: str | None = None,
         refresh_token: str | None = None,
         device_id: str | None = None,
+        token_update_callback: Callable[[AuthSession], Awaitable[None]] | None = None,
     ) -> None:
         """클라이언트를 초기화합니다."""
         self._session = session
@@ -87,6 +92,7 @@ class CJOneDeliveryClient:
         self._access_token = access_token
         self._refresh_token = refresh_token
         self._device_id = device_id or _make_device_id(self._phone_number)
+        self._token_update_callback = token_update_callback
 
     async def async_send_verification_code(self) -> None:
         """전화번호 인증번호 발송을 요청합니다."""
@@ -146,6 +152,42 @@ class CJOneDeliveryClient:
         """저장된 인증 토큰이 유효한지 확인합니다."""
         if not self._access_token or not self._refresh_token or not self._user_id:
             raise InvalidAuth("저장된 인증 토큰이 없습니다.")
+
+    async def async_refresh_token(self) -> AuthSession:
+        """저장된 refresh token으로 앱 인증 토큰을 갱신합니다."""
+        if not self._refresh_token or not self._user_id:
+            raise InvalidAuth("저장된 refresh token이 없습니다.")
+
+        response = await self._async_app_post(
+            REFRESH_URL,
+            {
+                "PHONE": self._phone_number,
+                "USRID": self._user_id,
+                "MBLAPP_ID": APP_ID,
+                "REFRESHTOKEN": self._refresh_token,
+            },
+            skip_token=True,
+        )
+        if response.get("RES_CD") == "RTE":
+            raise InvalidAuth("refresh token이 만료되었습니다. 재인증이 필요합니다.")
+        if response.get("RES_CD") != "S":
+            raise CannotConnect(response.get("RES_MSG", "인증 토큰 갱신에 실패했습니다."))
+
+        access_token = response.get("ACCESSTOKEN")
+        refresh_token = response.get("REFRESHTOKEN")
+        if not access_token or not refresh_token:
+            raise CannotConnect("토큰 갱신 응답에 토큰 값이 없습니다.")
+
+        auth_session = AuthSession(
+            user_id=self._user_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+        self._access_token = access_token
+        self._refresh_token = refresh_token
+        if self._token_update_callback is not None:
+            await self._token_update_callback(auth_session)
+        return auth_session
 
     async def async_get_delivery_status(
         self,
@@ -234,6 +276,7 @@ class CJOneDeliveryClient:
         screen_code: str | None = None,
         skip_token: bool = False,
         token: str | None = None,
+        allow_token_refresh: bool = True,
     ) -> dict[str, Any]:
         """앱과 같은 형식으로 API를 호출합니다."""
         header_token = None if skip_token else token or self._access_token
@@ -268,13 +311,56 @@ class CJOneDeliveryClient:
 
         encrypted_body = payload.get("B_PARAM")
         if not encrypted_body:
-            return payload
+            return await self._async_handle_token_response(
+                payload,
+                url=url,
+                data=data,
+                screen_code=screen_code,
+                skip_token=skip_token,
+                allow_token_refresh=allow_token_refresh,
+            )
 
         decrypted = unquote(_kisa_decrypt(str(encrypted_body))).replace("\n", " ").replace("+", " ")
         try:
-            return json.loads(decrypted)
+            response = json.loads(decrypted)
         except json.JSONDecodeError as err:
             raise CannotConnect("CJ O-NE API 암호화 응답을 JSON으로 해석하지 못했습니다.") from err
+
+        return await self._async_handle_token_response(
+            response,
+            url=url,
+            data=data,
+            screen_code=screen_code,
+            skip_token=skip_token,
+            allow_token_refresh=allow_token_refresh,
+        )
+
+    async def _async_handle_token_response(
+        self,
+        response: dict[str, Any],
+        *,
+        url: str,
+        data: dict[str, Any],
+        screen_code: str | None,
+        skip_token: bool,
+        allow_token_refresh: bool,
+    ) -> dict[str, Any]:
+        """토큰 만료 응답이면 갱신 후 원래 요청을 한 번 재시도합니다."""
+        response_code = response.get("RES_CD")
+        if not skip_token and allow_token_refresh and response_code in TOKEN_EXPIRED_CODES:
+            _LOGGER.debug("CJ O-NE access token 만료 응답(%s), 토큰 갱신 후 재시도", response_code)
+            await self.async_refresh_token()
+            return await self._async_app_post(
+                url,
+                data,
+                screen_code=screen_code,
+                skip_token=skip_token,
+                token=self._access_token,
+                allow_token_refresh=False,
+            )
+        if not skip_token and response_code in TOKEN_INVALID_CODES:
+            raise InvalidAuth("저장된 인증 토큰이 유효하지 않습니다. 재인증이 필요합니다.")
+        return response
 
     def _build_header_payload(
         self,

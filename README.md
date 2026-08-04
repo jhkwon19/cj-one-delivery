@@ -14,12 +14,13 @@ Home Assistant에서 CJ대한통운(CJ O-NE) 배송 현황을 조회하고, 배�
 - 배송완료 최근 5건 조회
 - 슬롯별 세부 센서 생성
 - 배송 상태 변경 이벤트 센서 제공
+- access token 만료 시 refresh token으로 자동 갱신
 - Home Assistant 자동화와 TTS 방송에 활용 가능
 - 별도 커스텀 Lovelace 카드 불필요
 
 ## 현재 버전
 
-- `v0.1.1`
+- `v0.1.2`
 
 ## 설치
 
@@ -161,6 +162,9 @@ action:
 ```
 
 상태, 최근 위치, 최근 일시 중 하나가 바뀌면 `최근 배송 이벤트` 센서가 갱신됩니다.
+
+access token이 만료된 경우에는 refresh token으로 토큰을 갱신한 뒤 원래 배송조회 요청을
+한 번 재시도합니다. refresh token까지 만료되면 재인증이 필요합니다.
 
 ## 참고 사항
 
