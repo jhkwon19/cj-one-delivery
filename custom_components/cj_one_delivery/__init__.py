@@ -83,6 +83,14 @@ async def _async_update_listener(
         entry.runtime_data.loaded_active_slot_count != _active_slot_count(entry)
         or entry.runtime_data.loaded_completed_slot_count != _completed_slot_count(entry)
     ):
+        from .sensor import remove_unconfigured_slot_entries
+
+        remove_unconfigured_slot_entries(
+            hass,
+            entry,
+            active_slot_count=_active_slot_count(entry),
+            completed_slot_count=_completed_slot_count(entry),
+        )
         await hass.config_entries.async_reload(entry.entry_id)
         return
 

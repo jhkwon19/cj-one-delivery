@@ -7,8 +7,9 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DeliveryStatus
@@ -46,7 +47,7 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
     active_slot_count = _active_slot_count(entry)
     completed_slot_count = _completed_slot_count(entry)
-    _remove_unconfigured_slot_entities(
+    remove_unconfigured_slot_entries(
         hass,
         entry,
         active_slot_count=active_slot_count,
@@ -368,34 +369,48 @@ def _completed_slot_count(entry: ConfigEntry) -> int:
     )
 
 
-def _remove_unconfigured_slot_entities(
+def remove_unconfigured_slot_entries(
     hass: HomeAssistant,
     entry: ConfigEntry,
     *,
     active_slot_count: int,
     completed_slot_count: int,
 ) -> None:
-    """현재 옵션 범위를 벗어난 슬롯 엔티티를 레지스트리에서 제거합니다."""
+    """현재 옵션 범위를 벗어난 슬롯 엔티티와 기기를 레지스트리에서 제거합니다."""
     entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
     for index in range(active_slot_count, ACTIVE_SLOT_LIMIT):
-        _remove_slot_entities(entity_registry, entry, "active", index)
+        _remove_slot_entries(entity_registry, device_registry, entry, "active", index)
     for index in range(completed_slot_count, COMPLETED_RECENT_LIMIT):
-        _remove_slot_entities(entity_registry, entry, "completed", index)
+        _remove_slot_entries(entity_registry, device_registry, entry, "completed", index)
 
 
-def _remove_slot_entities(
+def _remove_slot_entries(
     entity_registry: er.EntityRegistry,
+    device_registry: dr.DeviceRegistry,
     entry: ConfigEntry,
     slot_id: str,
     slot_index: int,
 ) -> None:
-    """슬롯 하나에 속한 센서 엔티티를 레지스트리에서 제거합니다."""
+    """슬롯 하나에 속한 센서 엔티티와 슬롯 기기를 레지스트리에서 제거합니다."""
     number = slot_index + 1
-    for field, _name in SLOT_FIELDS:
-        unique_id = f"{entry.entry_id}_{slot_id}_{number}_{field}"
-        entity_id = entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
-        if entity_id is not None:
-            entity_registry.async_remove(entity_id)
+    unique_id_prefix = f"{entry.entry_id}_{slot_id}_{number}_"
+    for entity_entry in er.async_entries_for_config_entry(
+        entity_registry,
+        entry.entry_id,
+    ):
+        if (
+            entity_entry.domain == "sensor"
+            and entity_entry.platform == DOMAIN
+            and entity_entry.unique_id.startswith(unique_id_prefix)
+        ):
+            entity_registry.async_remove(entity_entry.entity_id)
+
+    device = device_registry.async_get_device(
+        identifiers={(DOMAIN, f"{entry.entry_id}_{slot_id}_{number}")},
+    )
+    if device is not None:
+        device_registry.async_remove_device(device.id)
 
 
 def _device_info(coordinator: CJOneDeliveryCoordinator) -> dict[str, Any]:
