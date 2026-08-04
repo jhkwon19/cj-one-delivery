@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 import logging
 
@@ -10,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import CJOneDeliveryClient, DeliveryStatus
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import COMPLETED_RECENT_LIMIT, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .exceptions import CJOneDeliveryError
 
 _LOGGER = logging.getLogger(__name__)
@@ -52,6 +53,8 @@ class CJOneDeliveryCoordinator(DataUpdateCoordinator[dict[str, DeliveryStatus]])
         self.client = client
         self.last_error: str | None = None
         self.last_event: DeliveryEvent | None = None
+        self.active_statuses: list[DeliveryStatus] = []
+        self.completed_statuses: list[DeliveryStatus] = []
 
     async def _async_update_data(self) -> dict[str, DeliveryStatus]:
         """앱 API에서 최신 데이터를 가져옵니다."""
@@ -64,6 +67,8 @@ class CJOneDeliveryCoordinator(DataUpdateCoordinator[dict[str, DeliveryStatus]])
 
         self.last_error = None
         self._update_last_event(data)
+        self.active_statuses = _active_statuses(data.values())
+        self.completed_statuses = _completed_statuses(data.values())
         return data
 
     def _update_last_event(self, data: dict[str, DeliveryStatus]) -> None:
@@ -141,3 +146,19 @@ def _announcement(event_type: str, status: DeliveryStatus) -> str:
     if event_type == "new_delivery":
         return f"{product_name} 배송이 새로 확인되었습니다. 현재 {location}{status.status} 상태입니다."
     return f"{product_name} 배송이 {location}{status.status} 상태로 변경되었습니다."
+
+
+def _active_statuses(statuses: Iterable[DeliveryStatus]) -> list[DeliveryStatus]:
+    """진행중 배송 목록을 최근 일시순으로 반환합니다."""
+    active = [status for status in statuses if status.display_group == "진행중"]
+    return sorted(active, key=lambda status: status.last_event_time or "", reverse=True)
+
+
+def _completed_statuses(statuses: Iterable[DeliveryStatus]) -> list[DeliveryStatus]:
+    """완료 배송 목록을 최근 일시순으로 반환합니다."""
+    completed = [status for status in statuses if status.display_group == "배송완료"]
+    return sorted(
+        completed,
+        key=lambda status: status.last_event_time or "",
+        reverse=True,
+    )[:COMPLETED_RECENT_LIMIT]

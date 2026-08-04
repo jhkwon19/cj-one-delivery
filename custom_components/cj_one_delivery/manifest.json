@@ -1,7 +1,7 @@
 {
   "domain": "cj_one_delivery",
   "name": "CJ O-NE 배송조회",
-  "codeowners": [],
+  "codeowners": ["@jhkwon19"],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/jhkwon19/cj-one-delivery",

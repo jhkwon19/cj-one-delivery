@@ -29,6 +29,7 @@ SLOT_FIELDS: tuple[tuple[str, str], ...] = (
     ("courier", "배송기사"),
     ("detail", "배송 상세"),
 )
+SLOT_FIELD_NAMES = dict(SLOT_FIELDS)
 
 
 async def async_setup_entry(
@@ -81,18 +82,16 @@ class CJOneDeliverySummarySensor(
     @property
     def native_value(self) -> str:
         """배송 목록 요약 문구를 반환합니다."""
-        active_count = len(_active_statuses(self.coordinator.data.values()))
+        active_count = len(self.coordinator.active_statuses)
         return f"진행중 {active_count}건"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """요약과 인증 상태 속성을 반환합니다."""
-        active = _active_statuses(self.coordinator.data.values())
-        completed = _completed_statuses(self.coordinator.data.values())
         last_event = self.coordinator.last_event
         return {
-            "active_count": len(active),
-            "completed_recent_count": len(completed),
+            "active_count": len(self.coordinator.active_statuses),
+            "completed_recent_count": len(self.coordinator.completed_statuses),
             "completed_recent_limit": COMPLETED_RECENT_LIMIT,
             "last_changed_summary": last_event.announcement if last_event else "",
             "last_error": self.coordinator.last_error or "",
@@ -146,8 +145,8 @@ class CJOneDeliveryDeliveryListSensor(
     def _statuses(self) -> list[DeliveryStatus]:
         """이 센서가 표시할 배송 목록을 반환합니다."""
         if self._list_type == "active":
-            return _active_statuses(self.coordinator.data.values())
-        return _completed_statuses(self.coordinator.data.values())
+            return self.coordinator.active_statuses
+        return self.coordinator.completed_statuses
 
 
 class CJOneDeliveryDeliverySlotFieldSensor(
@@ -172,7 +171,7 @@ class CJOneDeliveryDeliverySlotFieldSensor(
         self._field = field
         self._attr_device_info = _slot_device_info(coordinator, slot_type, slot_index)
         number = slot_index + 1
-        field_name = dict(SLOT_FIELDS)[field]
+        field_name = SLOT_FIELD_NAMES[field]
         if slot_type == "active":
             self._attr_unique_id = (
                 f"{coordinator.config_entry.entry_id}_active_{number}_{field}"
@@ -229,9 +228,9 @@ class CJOneDeliveryDeliverySlotFieldSensor(
     def _status(self) -> DeliveryStatus | None:
         """이 슬롯에 표시할 배송 상태를 반환합니다."""
         statuses = (
-            _active_statuses(self.coordinator.data.values())
+            self.coordinator.active_statuses
             if self._slot_type == "active"
-            else _completed_statuses(self.coordinator.data.values())
+            else self.coordinator.completed_statuses
         )
         if self._slot_index >= len(statuses):
             return None
@@ -275,22 +274,6 @@ class CJOneDeliveryLastEventSensor(
                 "announcement": "",
             }
         return _event_payload(event)
-
-
-def _active_statuses(statuses: Any) -> list[DeliveryStatus]:
-    """진행중 배송 목록을 최근 일시순으로 반환합니다."""
-    active = [status for status in statuses if status.display_group == "진행중"]
-    return sorted(active, key=lambda status: status.last_event_time or "", reverse=True)
-
-
-def _completed_statuses(statuses: Any) -> list[DeliveryStatus]:
-    """최근 완료 배송 목록을 최근 일시순으로 반환합니다."""
-    completed = [status for status in statuses if status.display_group == "배송완료"]
-    return sorted(
-        completed,
-        key=lambda status: status.last_event_time or "",
-        reverse=True,
-    )[:COMPLETED_RECENT_LIMIT]
 
 
 def _delivery_payload(status: DeliveryStatus) -> dict[str, Any]:
