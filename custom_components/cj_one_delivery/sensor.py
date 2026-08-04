@@ -232,7 +232,6 @@ class CJOneDeliveryDeliverySlotFieldSensor(
         if self._field == "detail":
             attrs["basic_info"] = payload["basic_info"]
             attrs["tracking_history"] = payload["tracking_history"]
-        attrs["delivery"] = payload
         return attrs
 
     @property
