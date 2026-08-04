@@ -1,0 +1,12 @@
+{
+  "domain": "cj_one_delivery",
+  "name": "CJ O-NE 배송조회",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/custom-components/cj_one_delivery",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/custom-components/cj_one_delivery/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

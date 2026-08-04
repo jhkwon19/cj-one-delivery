@@ -1,0 +1,19 @@
+# Analysis artifacts and local tooling
+analysis/
+captures/
+tools/
+www/
+
+# Large or generated files
+*.apk
+*.pcap
+*.zip
+hs_err_pid*.log
+__pycache__/
+*.py[cod]
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

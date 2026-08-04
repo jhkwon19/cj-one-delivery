@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CJ O-NE 배송조회",
+        "description": "휴대폰 번호를 입력하면 앱과 같은 문자 인증 후 로그인된 배송 목록을 자동 조회합니다.",
+        "data": {
+          "phone_number": "휴대폰 번호"
+        }
+      },
+      "code": {
+        "title": "휴대폰 인증",
+        "description": "문자로 받은 인증번호를 입력하세요.",
+        "data": {
+          "auth_code": "인증번호"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "앱 API에 연결할 수 없습니다.",
+      "invalid_auth": "인증 정보가 올바르지 않습니다."
+    },
+    "abort": {
+      "already_configured": "이 계정은 이미 설정되어 있습니다."
+    }
+  }
+}
