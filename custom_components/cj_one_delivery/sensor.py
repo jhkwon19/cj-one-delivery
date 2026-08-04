@@ -14,9 +14,6 @@ from .api import DeliveryStatus
 from .const import (
     ACTIVE_SLOT_LIMIT,
     COMPLETED_RECENT_LIMIT,
-    CONF_ACCESS_TOKEN,
-    CONF_REFRESH_TOKEN,
-    CONF_USER_ID,
     DOMAIN,
 )
 from .coordinator import CJOneDeliveryCoordinator, DeliveryEvent
@@ -90,7 +87,6 @@ class CJOneDeliverySummarySensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """요약과 인증 상태 속성을 반환합니다."""
-        entry_data = self.coordinator.config_entry.data
         active = _active_statuses(self.coordinator.data.values())
         completed = _completed_statuses(self.coordinator.data.values())
         last_event = self.coordinator.last_event
@@ -99,14 +95,6 @@ class CJOneDeliverySummarySensor(
             "completed_recent_count": len(completed),
             "completed_recent_limit": COMPLETED_RECENT_LIMIT,
             "last_changed_summary": last_event.announcement if last_event else "",
-            "tracking_numbers": list(self.coordinator.data),
-            "phone_number": self.coordinator.config_entry.title,
-            "authenticated": bool(
-                entry_data.get(CONF_USER_ID)
-                and entry_data.get(CONF_ACCESS_TOKEN)
-                and entry_data.get(CONF_REFRESH_TOKEN)
-            ),
-            "user_id": entry_data.get(CONF_USER_ID, ""),
             "last_error": self.coordinator.last_error or "",
         }
 
@@ -142,9 +130,12 @@ class CJOneDeliveryDeliveryListSensor(
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """배송 목록 카드가 사용할 배송건 속성을 반환합니다."""
+        """배송 목록 요약 속성을 반환합니다."""
         attrs: dict[str, Any] = {
-            "deliveries": [_delivery_payload(status) for status in self._statuses],
+            "deliveries": [
+                _delivery_summary_payload(status, index)
+                for index, status in enumerate(self._statuses, start=1)
+            ],
             "last_error": self.coordinator.last_error or "",
         }
         if self._list_type == "completed_recent":
@@ -319,6 +310,21 @@ def _delivery_payload(status: DeliveryStatus) -> dict[str, Any]:
         "courier": courier,
         "basic_info": basic_info,
         "tracking_history": status.tracking_history or [],
+    }
+
+
+def _delivery_summary_payload(
+    status: DeliveryStatus,
+    slot_index: int,
+) -> dict[str, str | int]:
+    """목록 센서에 넣을 가벼운 배송 요약 값을 만듭니다."""
+    return {
+        "slot_index": slot_index,
+        "tracking_number_display": _format_tracking_number(status.tracking_number),
+        "status": status.status,
+        "product_name": status.status_detail or "",
+        "last_location": status.last_location or "",
+        "last_event_time": status.last_event_time or "",
     }
 
 
