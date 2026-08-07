@@ -17,11 +17,10 @@
       },
       "options": {
         "title": "배송조회 옵션",
-        "description": "조회 주기와 대시보드 슬롯 개수를 설정합니다. 이 값은 등록 후에도 통합구성요소 옵션에서 변경할 수 있습니다.",
+        "description": "조회 주기와 배송완료 보관 일수를 설정합니다. 이 값은 등록 후에도 통합구성요소 옵션에서 변경할 수 있습니다.",
         "data": {
           "scan_interval_minutes": "조회 주기(분)",
-          "active_slot_count": "진행중 배송 슬롯 개수",
-          "completed_slot_count": "배송완료 슬롯 개수"
+          "completed_retention_days": "배송완료 보관 일수"
         }
       }
     },
@@ -37,11 +36,10 @@
     "step": {
       "init": {
         "title": "CJ O-NE 배송조회 옵션",
-        "description": "배송조회 주기와 대시보드 슬롯 개수를 설정합니다.",
+        "description": "배송조회 주기와 배송완료 보관 일수를 설정합니다.",
         "data": {
           "scan_interval_minutes": "조회 주기(분)",
-          "active_slot_count": "진행중 배송 슬롯 개수",
-          "completed_slot_count": "배송완료 슬롯 개수"
+          "completed_retention_days": "배송완료 보관 일수"
         }
       }
     }

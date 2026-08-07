@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import base64
 from collections.abc import Awaitable, Callable
 import hashlib
@@ -20,7 +20,7 @@ from aiohttp import ClientSession
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from .exceptions import CJOneDeliveryError, CannotConnect, InvalidAuth
-from .const import COMPLETED_RECENT_LIMIT
+from .const import DEFAULT_COMPLETED_RETENTION_DAYS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class CJOneDeliveryClient:
         access_token: str | None = None,
         refresh_token: str | None = None,
         device_id: str | None = None,
-        completed_recent_limit: int = COMPLETED_RECENT_LIMIT,
+        completed_retention_days: int = DEFAULT_COMPLETED_RETENTION_DAYS,
         token_update_callback: Callable[[AuthSession], Awaitable[None]] | None = None,
     ) -> None:
         """클라이언트를 초기화합니다."""
@@ -93,8 +93,9 @@ class CJOneDeliveryClient:
         self._access_token = access_token
         self._refresh_token = refresh_token
         self._device_id = device_id or _make_device_id(self._phone_number)
-        self._completed_recent_limit = completed_recent_limit
+        self._completed_retention_days = completed_retention_days
         self._token_update_callback = token_update_callback
+        self._completed_cache: dict[str, DeliveryStatus] = {}
 
     async def async_send_verification_code(self) -> None:
         """전화번호 인증번호 발송을 요청합니다."""
@@ -155,9 +156,9 @@ class CJOneDeliveryClient:
         if not self._access_token or not self._refresh_token or not self._user_id:
             raise InvalidAuth("저장된 인증 토큰이 없습니다.")
 
-    def set_completed_recent_limit(self, limit: int) -> None:
-        """완료 배송 상세 조회 제한 개수를 설정합니다."""
-        self._completed_recent_limit = limit
+    def set_completed_retention_days(self, retention_days: int) -> None:
+        """완료 배송을 계속 표시할 보관 일수를 설정합니다."""
+        self._completed_retention_days = retention_days
 
     async def async_refresh_token(self) -> AuthSession:
         """저장된 refresh token으로 앱 인증 토큰을 갱신합니다."""
@@ -224,15 +225,31 @@ class CJOneDeliveryClient:
         statuses: dict[str, DeliveryStatus] = {}
         for row in _filter_display_rows(
             rows,
-            completed_recent_limit=self._completed_recent_limit,
+            completed_retention_days=self._completed_retention_days,
         ):
             if not isinstance(row, dict):
                 continue
-            detail = await self._async_get_delivery_detail(row)
-            status = _delivery_status_from_row(row, detail)
+            tracking_number = _normalize_phone_number(str(row.get("TRSPBILLNUM", "")))
+            is_completed = _is_completed_delivery(row)
+            cached = self._completed_cache.get(tracking_number) if is_completed else None
+            if cached is not None:
+                status = cached
+            else:
+                detail = await self._async_get_delivery_detail(row)
+                status = _delivery_status_from_row(row, detail)
+                if is_completed and tracking_number:
+                    self._completed_cache[tracking_number] = status
             key = status.tracking_number or f"delivery_{len(statuses) + 1}"
             statuses[key] = status
+
+        self._prune_completed_cache(statuses)
         return statuses
+
+    def _prune_completed_cache(self, current_statuses: dict[str, DeliveryStatus]) -> None:
+        """더 이상 표시되지 않는 완료 배송 캐시를 정리합니다."""
+        stale_keys = [key for key in self._completed_cache if key not in current_statuses]
+        for key in stale_keys:
+            del self._completed_cache[key]
 
     async def _async_get_delivery_rows(self) -> list[dict[str, Any]]:
         """앱과 같이 배송 목록 전체 페이지를 조회합니다."""
@@ -732,14 +749,47 @@ def _deduplicate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _filter_display_rows(
     rows: list[dict[str, Any]],
     *,
-    completed_recent_limit: int,
+    completed_retention_days: int,
 ) -> list[dict[str, Any]]:
-    """진행중 배송 전체와 최근 완료 배송 일부만 반환합니다."""
+    """진행중 배송 전체와 보관기간 이내의 완료 배송만 반환합니다."""
     active_rows = [row for row in rows if not _is_completed_delivery(row)]
-    completed_rows = [row for row in rows if _is_completed_delivery(row)]
+    completed_rows = [
+        row
+        for row in rows
+        if _is_completed_delivery(row)
+        and _within_retention(row, completed_retention_days)
+    ]
     active_rows.sort(key=_row_sort_key, reverse=True)
     completed_rows.sort(key=_row_sort_key, reverse=True)
-    return active_rows + completed_rows[:completed_recent_limit]
+    return active_rows + completed_rows
+
+
+def _within_retention(row: dict[str, Any], retention_days: int) -> bool:
+    """완료 배송이 보관기간 이내인지 반환합니다."""
+    scan_time = _parse_scan_datetime(row)
+    if scan_time is None:
+        return True
+    return datetime.now() - scan_time <= timedelta(days=retention_days)
+
+
+def _parse_scan_datetime(row: dict[str, Any]) -> datetime | None:
+    """배송 목록 행의 스캔 일시를 datetime으로 파싱합니다."""
+    scan_date = str(row.get("SCNDT") or "")
+    scan_time = str(row.get("SCNHR") or "")
+    if len(scan_date) != 8:
+        return None
+    try:
+        hour = int(scan_time[:2]) if len(scan_time) >= 2 else 0
+        minute = int(scan_time[2:4]) if len(scan_time) >= 4 else 0
+        return datetime(
+            int(scan_date[:4]),
+            int(scan_date[4:6]),
+            int(scan_date[6:8]),
+            hour,
+            minute,
+        )
+    except ValueError:
+        return None
 
 
 def _is_completed_delivery(row: dict[str, Any]) -> bool:

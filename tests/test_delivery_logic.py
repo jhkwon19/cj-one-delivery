@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 import importlib.util
 from pathlib import Path
 import sys
@@ -133,21 +134,19 @@ def _install_package_stubs() -> None:
     package = types.ModuleType(PACKAGE)
     package.__path__ = []
     api = types.ModuleType(f"{PACKAGE}.api")
-    exceptions = types.ModuleType(f"{PACKAGE}.exceptions")
 
     class CJOneDeliveryClient:
         pass
 
-    class CJOneDeliveryError(Exception):
-        pass
-
     api.CJOneDeliveryClient = CJOneDeliveryClient
     api.DeliveryStatus = FakeDeliveryStatus
-    exceptions.CJOneDeliveryError = CJOneDeliveryError
 
     sys.modules["custom_components"] = custom_components
     sys.modules[PACKAGE] = package
     sys.modules[f"{PACKAGE}.api"] = api
+    exceptions = _load_module(
+        f"{PACKAGE}.exceptions", ROOT / "custom_components/cj_one_delivery/exceptions.py"
+    )
     sys.modules[f"{PACKAGE}.exceptions"] = exceptions
 
 
@@ -159,6 +158,36 @@ def _load_module(name: str, path: Path) -> types.ModuleType:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _install_aiohttp_stub() -> None:
+    """api.py가 임포트만 하고 실제로 쓰지 않는 aiohttp를 스텁 처리합니다."""
+    aiohttp = types.ModuleType("aiohttp")
+
+    class ClientSession:
+        pass
+
+    aiohttp.ClientSession = ClientSession
+    sys.modules["aiohttp"] = aiohttp
+
+
+def load_api_module() -> types.ModuleType:
+    """실제 api.py를 로드합니다(홈어시스턴트 의존성이 없어 aiohttp만 스텁 처리)."""
+    _install_aiohttp_stub()
+    custom_components = types.ModuleType("custom_components")
+    custom_components.__path__ = []
+    package = types.ModuleType(PACKAGE)
+    package.__path__ = []
+    sys.modules["custom_components"] = custom_components
+    sys.modules[PACKAGE] = package
+
+    sys.modules[f"{PACKAGE}.exceptions"] = _load_module(
+        f"{PACKAGE}.exceptions", ROOT / "custom_components/cj_one_delivery/exceptions.py"
+    )
+    sys.modules[f"{PACKAGE}.const"] = _load_module(
+        f"{PACKAGE}.const", ROOT / "custom_components/cj_one_delivery/const.py"
+    )
+    return _load_module(f"{PACKAGE}.api", ROOT / "custom_components/cj_one_delivery/api.py")
 
 
 class DeliveryEventTests(unittest.TestCase):
@@ -275,64 +304,196 @@ class DeliveryEventTests(unittest.TestCase):
 
 
 class DeliveryListTests(unittest.TestCase):
-    """배송 목록 정렬과 슬롯 옵션 테스트."""
+    """배송 목록 정렬 테스트."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.coordinator, cls.sensor = load_modules()
 
     def test_active_statuses_are_sorted_by_last_event_time(self) -> None:
-        statuses = [
-            FakeDeliveryStatus("1", "집화처리", last_event_time="2026-08-01 10:00:00"),
-            FakeDeliveryStatus("2", "간선상차", last_event_time="2026-08-02 10:00:00"),
-            FakeDeliveryStatus(
+        data = {
+            "1": FakeDeliveryStatus("1", "집화처리", last_event_time="2026-08-01 10:00:00"),
+            "2": FakeDeliveryStatus("2", "간선상차", last_event_time="2026-08-02 10:00:00"),
+            "3": FakeDeliveryStatus(
                 "3",
                 "배달완료",
                 last_event_time="2026-08-03 10:00:00",
                 display_group="배송완료",
             ),
-        ]
+        }
 
-        active = self.coordinator._active_statuses(statuses)
+        active = self.sensor._active_statuses(data)
 
         self.assertEqual([status.tracking_number for status in active], ["2", "1"])
 
-    def test_completed_statuses_are_sorted_and_limited(self) -> None:
-        statuses = [
-            FakeDeliveryStatus(
+    def test_completed_statuses_are_sorted_by_last_event_time(self) -> None:
+        data = {
+            "1": FakeDeliveryStatus(
                 "1",
                 "배달완료",
                 last_event_time="2026-08-01 10:00:00",
                 display_group="배송완료",
             ),
-            FakeDeliveryStatus(
+            "2": FakeDeliveryStatus(
                 "2",
                 "배달완료",
                 last_event_time="2026-08-03 10:00:00",
                 display_group="배송완료",
             ),
-            FakeDeliveryStatus(
+            "3": FakeDeliveryStatus(
                 "3",
                 "배달완료",
                 last_event_time="2026-08-02 10:00:00",
                 display_group="배송완료",
             ),
-        ]
+        }
 
-        completed = self.coordinator._completed_statuses(statuses, limit=2)
+        completed = self.sensor._completed_statuses(data)
 
-        self.assertEqual([status.tracking_number for status in completed], ["2", "3"])
-
-    def test_slot_count_options(self) -> None:
-        entry = FakeEntry(
-            {
-                "active_slot_count": 2,
-                "completed_slot_count": 4,
-            }
+        self.assertEqual(
+            [status.tracking_number for status in completed], ["2", "3", "1"]
         )
 
-        self.assertEqual(self.sensor._active_slot_count(entry), 2)
-        self.assertEqual(self.sensor._completed_slot_count(entry), 4)
+    def test_entity_cleanup_removes_stale_and_legacy_unique_ids(self) -> None:
+        entry_id = "entry123"
+        prefix = f"{entry_id}_"
+
+        # 신규(운송장 기반) unique_id는 유효 집합에 있으면 유지
+        self.assertEqual(
+            self.sensor._tracking_number_from_unique_id(
+                f"{prefix}301551253841_status", prefix
+            ),
+            "301551253841",
+        )
+        # 구 버전 슬롯 기반 unique_id는 어떤 유효 운송장 번호와도 일치하지 않음
+        self.assertEqual(
+            self.sensor._tracking_number_from_unique_id(
+                f"{prefix}active_1_status", prefix
+            ),
+            "active_1",
+        )
+        self.assertNotIn("active_1", {"301551253841"})
+        # 알 수 없는 형식은 정리 대상으로 처리되도록 None 반환
+        self.assertIsNone(
+            self.sensor._tracking_number_from_unique_id(f"{prefix}summary", prefix)
+        )
+
+
+class DeliveryRetentionFilterTests(unittest.TestCase):
+    """배송완료 보관기간 필터링 테스트."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.api = load_api_module()
+
+    @staticmethod
+    def _row(*, tracking_number: str, status_code: str, days_ago: int) -> dict:
+        scan_time = datetime.now() - timedelta(days=days_ago)
+        return {
+            "TRSPBILLNUM": tracking_number,
+            "SCNDIVCD": status_code,
+            "SCNDT": scan_time.strftime("%Y%m%d"),
+            "SCNHR": scan_time.strftime("%H%M%S"),
+        }
+
+    def test_active_rows_are_always_kept_regardless_of_age(self) -> None:
+        rows = [self._row(tracking_number="1", status_code="11", days_ago=365)]
+
+        result = self.api._filter_display_rows(rows, completed_retention_days=7)
+
+        self.assertEqual(len(result), 1)
+
+    def test_completed_rows_within_retention_are_kept(self) -> None:
+        rows = [self._row(tracking_number="1", status_code="91", days_ago=3)]
+
+        result = self.api._filter_display_rows(rows, completed_retention_days=7)
+
+        self.assertEqual(len(result), 1)
+
+    def test_completed_rows_past_retention_are_dropped(self) -> None:
+        rows = [self._row(tracking_number="1", status_code="91", days_ago=10)]
+
+        result = self.api._filter_display_rows(rows, completed_retention_days=7)
+
+        self.assertEqual(result, [])
+
+
+class DeliveryDetailCachingTests(unittest.IsolatedAsyncioTestCase):
+    """완료 배송 상세 캐싱/정리 동작 테스트."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.api = load_api_module()
+
+    def _make_client(self, rows: list[dict], retention_days: int):
+        api = self.api
+
+        class RecordingClient(api.CJOneDeliveryClient):
+            def __init__(self) -> None:
+                super().__init__(
+                    session=None,
+                    phone_number="01000000000",
+                    user_id="user",
+                    access_token="token",
+                    refresh_token="refresh",
+                    completed_retention_days=retention_days,
+                )
+                self.detail_calls: list[str] = []
+
+            async def _async_get_delivery_rows(self):
+                return rows
+
+            async def _async_get_delivery_detail(self, row):
+                self.detail_calls.append(row["TRSPBILLNUM"])
+                return {"list": []}
+
+        return RecordingClient()
+
+    async def test_completed_detail_is_fetched_only_once(self) -> None:
+        now = datetime.now()
+        rows = [
+            {
+                "TRSPBILLNUM": "111",
+                "SCNDIVCD": "91",
+                "SCNDT": now.strftime("%Y%m%d"),
+                "SCNHR": now.strftime("%H%M%S"),
+            },
+            {
+                "TRSPBILLNUM": "222",
+                "SCNDIVCD": "11",
+                "SCNDT": now.strftime("%Y%m%d"),
+                "SCNHR": now.strftime("%H%M%S"),
+            },
+        ]
+        client = self._make_client(rows, retention_days=7)
+
+        await client.async_get_delivery_statuses()
+        await client.async_get_delivery_statuses()
+
+        self.assertEqual(client.detail_calls.count("111"), 1)
+        self.assertEqual(client.detail_calls.count("222"), 2)
+
+    async def test_completed_cache_prunes_once_retention_window_passes(self) -> None:
+        ten_days_ago = datetime.now() - timedelta(days=10)
+        rows = [
+            {
+                "TRSPBILLNUM": "111",
+                "SCNDIVCD": "91",
+                "SCNDT": ten_days_ago.strftime("%Y%m%d"),
+                "SCNHR": ten_days_ago.strftime("%H%M%S"),
+            }
+        ]
+        client = self._make_client(rows, retention_days=30)
+
+        first = await client.async_get_delivery_statuses()
+        self.assertIn("111", first)
+        self.assertIn("111", client._completed_cache)
+
+        client.set_completed_retention_days(7)
+        second = await client.async_get_delivery_statuses()
+
+        self.assertEqual(second, {})
+        self.assertNotIn("111", client._completed_cache)
 
 
 if __name__ == "__main__":

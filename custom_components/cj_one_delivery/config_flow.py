@@ -11,21 +11,19 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .api import AuthSession, CJOneDeliveryClient
 from .const import (
-    ACTIVE_SLOT_LIMIT,
     CONF_ACCESS_TOKEN,
-    CONF_ACTIVE_SLOT_COUNT,
     CONF_AUTH_CODE,
-    CONF_COMPLETED_SLOT_COUNT,
+    CONF_COMPLETED_RETENTION_DAYS,
     CONF_PHONE_NUMBER,
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL_MINUTES,
     CONF_USER_ID,
-    COMPLETED_RECENT_LIMIT,
-    DEFAULT_ACTIVE_SLOT_COUNT,
-    DEFAULT_COMPLETED_SLOT_COUNT,
+    DEFAULT_COMPLETED_RETENTION_DAYS,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
+    MAX_COMPLETED_RETENTION_DAYS,
     MAX_SCAN_INTERVAL_MINUTES,
+    MIN_COMPLETED_RETENTION_DAYS,
     MIN_SCAN_INTERVAL_MINUTES,
 )
 from .exceptions import CannotConnect, InvalidAuth
@@ -50,24 +48,17 @@ def _options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
                 ),
             ),
             vol.Required(
-                CONF_ACTIVE_SLOT_COUNT,
+                CONF_COMPLETED_RETENTION_DAYS,
                 default=options.get(
-                    CONF_ACTIVE_SLOT_COUNT,
-                    DEFAULT_ACTIVE_SLOT_COUNT,
+                    CONF_COMPLETED_RETENTION_DAYS,
+                    DEFAULT_COMPLETED_RETENTION_DAYS,
                 ),
             ): vol.All(
                 vol.Coerce(int),
-                vol.Range(min=1, max=ACTIVE_SLOT_LIMIT),
-            ),
-            vol.Required(
-                CONF_COMPLETED_SLOT_COUNT,
-                default=options.get(
-                    CONF_COMPLETED_SLOT_COUNT,
-                    DEFAULT_COMPLETED_SLOT_COUNT,
+                vol.Range(
+                    min=MIN_COMPLETED_RETENTION_DAYS,
+                    max=MAX_COMPLETED_RETENTION_DAYS,
                 ),
-            ): vol.All(
-                vol.Coerce(int),
-                vol.Range(min=1, max=COMPLETED_RECENT_LIMIT),
             ),
         }
     )

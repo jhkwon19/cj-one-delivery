@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
@@ -13,9 +12,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import CJOneDeliveryClient, DeliveryStatus
 from .const import (
-    CONF_COMPLETED_SLOT_COUNT,
+    CONF_COMPLETED_RETENTION_DAYS,
     CONF_SCAN_INTERVAL_MINUTES,
-    DEFAULT_COMPLETED_SLOT_COUNT,
+    DEFAULT_COMPLETED_RETENTION_DAYS,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
 )
@@ -60,10 +59,6 @@ class CJOneDeliveryCoordinator(DataUpdateCoordinator[dict[str, DeliveryStatus]])
         self.client = client
         self.last_error: str | None = None
         self.last_event: DeliveryEvent | None = None
-        self.active_statuses: list[DeliveryStatus] = []
-        self.completed_statuses: list[DeliveryStatus] = []
-        self.loaded_active_slot_count = 0
-        self.loaded_completed_slot_count = 0
 
     async def _async_update_data(self) -> dict[str, DeliveryStatus]:
         """앱 API에서 최신 데이터를 가져옵니다."""
@@ -76,16 +71,14 @@ class CJOneDeliveryCoordinator(DataUpdateCoordinator[dict[str, DeliveryStatus]])
 
         self.last_error = None
         self._update_last_event(data)
-        self.active_statuses = _active_statuses(data.values())
-        self.completed_statuses = _completed_statuses(
-            data.values(),
-            limit=_completed_slot_count(self.config_entry),
-        )
         return data
 
     def apply_options(self) -> None:
         """옵션 변경사항을 코디네이터에 반영합니다."""
         self.update_interval = _scan_interval(self.config_entry)
+        self.client.set_completed_retention_days(
+            _completed_retention_days(self.config_entry)
+        )
 
     def _update_last_event(self, data: dict[str, DeliveryStatus]) -> None:
         """이전 조회 데이터와 비교해 최근 배송 변경 이벤트를 갱신합니다."""
@@ -164,26 +157,6 @@ def _announcement(event_type: str, status: DeliveryStatus) -> str:
     return f"{product_name} 배송이 {location}{status.status} 상태로 변경되었습니다."
 
 
-def _active_statuses(statuses: Iterable[DeliveryStatus]) -> list[DeliveryStatus]:
-    """진행중 배송 목록을 최근 일시순으로 반환합니다."""
-    active = [status for status in statuses if status.display_group == "진행중"]
-    return sorted(active, key=lambda status: status.last_event_time or "", reverse=True)
-
-
-def _completed_statuses(
-    statuses: Iterable[DeliveryStatus],
-    *,
-    limit: int,
-) -> list[DeliveryStatus]:
-    """완료 배송 목록을 최근 일시순으로 반환합니다."""
-    completed = [status for status in statuses if status.display_group == "배송완료"]
-    return sorted(
-        completed,
-        key=lambda status: status.last_event_time or "",
-        reverse=True,
-    )[:limit]
-
-
 def _scan_interval(entry: ConfigEntry) -> timedelta:
     """설정된 조회 주기를 반환합니다."""
     return timedelta(
@@ -194,11 +167,11 @@ def _scan_interval(entry: ConfigEntry) -> timedelta:
     )
 
 
-def _completed_slot_count(entry: ConfigEntry) -> int:
-    """설정된 완료 슬롯 표시 개수를 반환합니다."""
+def _completed_retention_days(entry: ConfigEntry) -> int:
+    """설정된 배송완료 보관 일수를 반환합니다."""
     return int(
         entry.options.get(
-            CONF_COMPLETED_SLOT_COUNT,
-            DEFAULT_COMPLETED_SLOT_COUNT,
+            CONF_COMPLETED_RETENTION_DAYS,
+            DEFAULT_COMPLETED_RETENTION_DAYS,
         )
     )
