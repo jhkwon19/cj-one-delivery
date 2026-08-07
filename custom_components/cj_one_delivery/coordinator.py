@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
+import random
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -21,6 +22,8 @@ from .const import (
 from .exceptions import CJOneDeliveryError
 
 _LOGGER = logging.getLogger(__name__)
+
+SCAN_INTERVAL_JITTER_RATIO = 0.1
 
 
 @dataclass(slots=True)
@@ -68,6 +71,9 @@ class CJOneDeliveryCoordinator(DataUpdateCoordinator[dict[str, DeliveryStatus]])
             self.last_error = str(err)
             _LOGGER.warning("CJ O-NE 배송 목록 조회 실패: %s", err)
             return self.data or {}
+        finally:
+            # 매 조회마다 주기를 다시 흔들어, 일정한 간격으로 도는 봇 패턴을 피한다.
+            self.update_interval = _scan_interval(self.config_entry)
 
         self.last_error = None
         self._update_last_event(data)
@@ -158,13 +164,13 @@ def _announcement(event_type: str, status: DeliveryStatus) -> str:
 
 
 def _scan_interval(entry: ConfigEntry) -> timedelta:
-    """설정된 조회 주기를 반환합니다."""
-    return timedelta(
-        minutes=entry.options.get(
-            CONF_SCAN_INTERVAL_MINUTES,
-            DEFAULT_SCAN_INTERVAL_MINUTES,
-        )
+    """설정된 조회 주기에 무작위 지터를 더해 반환합니다."""
+    base_minutes = entry.options.get(
+        CONF_SCAN_INTERVAL_MINUTES,
+        DEFAULT_SCAN_INTERVAL_MINUTES,
     )
+    jitter = random.uniform(-SCAN_INTERVAL_JITTER_RATIO, SCAN_INTERVAL_JITTER_RATIO)
+    return timedelta(minutes=max(1, base_minutes * (1 + jitter)))
 
 
 def _completed_retention_days(entry: ConfigEntry) -> int:

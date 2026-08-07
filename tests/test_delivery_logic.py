@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import types
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -449,7 +450,8 @@ class DeliveryDetailCachingTests(unittest.IsolatedAsyncioTestCase):
 
         return RecordingClient()
 
-    async def test_completed_detail_is_fetched_only_once(self) -> None:
+    @mock.patch("asyncio.sleep", new_callable=mock.AsyncMock)
+    async def test_completed_detail_is_fetched_only_once(self, _sleep: mock.AsyncMock) -> None:
         now = datetime.now()
         rows = [
             {
@@ -472,8 +474,13 @@ class DeliveryDetailCachingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(client.detail_calls.count("111"), 1)
         self.assertEqual(client.detail_calls.count("222"), 2)
+        # 캐시로 재사용되지 않은 상세 조회(3번)마다 요청 사이에 지연이 들어가야 한다.
+        self.assertEqual(_sleep.await_count, 3)
 
-    async def test_completed_cache_prunes_once_retention_window_passes(self) -> None:
+    @mock.patch("asyncio.sleep", new_callable=mock.AsyncMock)
+    async def test_completed_cache_prunes_once_retention_window_passes(
+        self, _sleep: mock.AsyncMock
+    ) -> None:
         ten_days_ago = datetime.now() - timedelta(days=10)
         rows = [
             {

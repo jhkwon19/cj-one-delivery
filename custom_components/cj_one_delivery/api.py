@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import asyncio
 import base64
 from collections.abc import Awaitable, Callable
 import hashlib
 import json
 import logging
+import random
 from typing import Any
 from urllib.parse import quote, unquote
 
@@ -29,6 +31,8 @@ TOKEN_INVALID_CODES = {"TFA", "TF"}
 
 APP_ID = "cjkoreaexpress"
 APP_VERSION = "6.3.3"
+USER_AGENT = "okhttp/4.12.0"
+DETAIL_FETCH_DELAY_RANGE = (0.5, 2.0)
 BASE_URL = "https://dxcstmapp.cjlogistics.com/"
 SMS_AUTH_URL = f"{BASE_URL}app.do?cmd=SMS_AUTH"
 COMPARE_AUTH_C_URL = f"{BASE_URL}app.do?cmd=COMPARE_AUTH_C2"
@@ -235,6 +239,7 @@ class CJOneDeliveryClient:
             if cached is not None:
                 status = cached
             else:
+                await asyncio.sleep(random.uniform(*DETAIL_FETCH_DELAY_RANGE))
                 detail = await self._async_get_delivery_detail(row)
                 status = _delivery_status_from_row(row, detail)
                 if is_completed and tracking_number:
@@ -308,6 +313,7 @@ class CJOneDeliveryClient:
         header_token = None if skip_token else token or self._access_token
         headers = {
             "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": USER_AGENT,
             "H_PARAM": _kisa_encrypt(
                 _quote_json(
                     self._build_header_payload(
